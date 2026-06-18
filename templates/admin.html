@@ -1,0 +1,198 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row g-4">
+    
+    <div class="col-xl-4 col-lg-5">
+        <div class="card card-berkut p-4 h-100">
+            <div class="d-flex align-items-center mb-3">
+                <div class="bg-success bg-opacity-10 text-success p-2 rounded me-3">
+                    <i class="bi bi-person-plus-fill fs-4"></i>
+                </div>
+                <div>
+                    <h5 class="mb-0 text-white fw-bold">Реєстрація особового складу</h5>
+                    <small class="text-muted">Внесення нового облікового запису в систему</small>
+                </div>
+            </div>
+            
+            <hr class="border-secondary my-3">
+            
+            <form method="POST">
+                <input type="hidden" name="action" value="create_user">
+                
+                <div class="mb-3">
+                    <label class="form-label text-uppercase text-muted fw-bold" style="font-size: 0.75rem;">Позивний або ПІБ</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-dark border-secondary"><i class="bi bi-person"></i></span>
+                        <input type="text" name="name" class="form-control bg-dark border-secondary text-white" placeholder="напр., Друг Сірко" required autocomplete="off">
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label text-uppercase text-muted fw-bold" style="font-size: 0.75rem;">Логін для входу</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-dark border-secondary"><i class="bi bi-fingerprint"></i></span>
+                        <input type="text" name="username" class="form-control bg-dark border-secondary text-white" placeholder="напр., sk_sirko" required autocomplete="off">
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label text-uppercase text-muted fw-bold" style="font-size: 0.75rem;">Тимчасовий пароль</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-dark border-secondary"><i class="bi bi-key"></i></span>
+                        <input type="password" name="password" class="form-control bg-dark border-secondary text-white" placeholder="••••••••" required>
+                    </div>
+                </div>
+                
+                <div class="mb-4">
+                    <label class="form-label text-uppercase text-muted fw-bold" style="font-size: 0.75rem;">Рівень доступу / Роль</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-dark border-secondary"><i class="bi bi-shield-check"></i></span>
+                        <select name="role" class="form-select bg-dark border-secondary text-white">
+                            <option value="viewer">Спостерігач (Тільки перегляд карти)</option>
+                            <option value="operator">Оператор (Внесення цілей та маркерів)</option>
+                            <option value="admin">Адміністратор (Повний доступ + Керування)</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <button type="submit" class="btn btn-success w-100 py-2 fw-bold text-uppercase" style="letter-spacing: 0.5px;">
+                    <i class="bi bi-check-lg me-1"></i> Створити акаунт
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="col-xl-8 col-lg-7">
+        <div class="card card-berkut p-4 h-100">
+            <div class="d-flex align-items-center mb-3">
+                <div class="bg-primary bg-opacity-10 text-primary p-2 rounded me-3">
+                    <i class="bi bi-shield-shaded fs-4"></i>
+                </div>
+                <div>
+                    <h5 class="mb-0 text-white fw-bold">Активні облікові записи</h5>
+                    <small class="text-muted">Керування правами та доступами підрозділу</small>
+                </div>
+            </div>
+            
+            <hr class="border-secondary my-3">
+            
+            <div class="table-responsive">
+                <table class="table table-dark table-hover align-middle mb-0" style="border-color: #2d2d2d;">
+                    <thead>
+                        <tr class="text-uppercase text-muted" style="font-size: 0.75rem; letter-spacing: 0.5px;">
+                            <th class="border-0 pb-3">Користувач</th>
+                            <th class="border-0 pb-3">Системний логін</th>
+                            <th class="border-0 pb-3">Рівень доступу</th>
+                            <th class="border-0 pb-3 text-end">Дії з акаунтом</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for u in users %}
+                        <tr>
+                            <td class="py-3">
+                                <div class="d-flex align-items-center">
+                                    <div class="avatar-placeholder bg-dark border border-secondary text-white rounded-circle d-flex align-items-center justify-content-center me-2" style="width: 32px; height: 32px; font-size: 0.85rem; font-weight: 600;">
+                                        {{ u.name[:2].upper() }}
+                                    </div>
+                                    
+                                    <form method="POST" class="d-flex align-items-center gap-1">
+                                        <input type="hidden" name="action" value="update_name">
+                                        <input type="hidden" name="user_id" value="{{ u.id }}">
+                                        <input type="text" name="new_name" class="form-control form-control-sm bg-transparent border-0 text-white fw-bold p-0 ps-1" value="{{ u.name }}" style="max-width: 160px; border-bottom: 1px dashed #444 !important; border-radius: 0;">
+                                        <button type="submit" class="btn btn-sm text-success p-0 ms-1" title="Зберегти зміну"><i class="bi bi-check2"></i></button>
+                                    </form>
+                                </div>
+                            </td>
+                            <td class="py-3"><code class="text-warning" style="font-size: 0.9rem;">{{ u.username }}</code></td>
+                            <td class="py-3">
+                                {% if u.role == 'admin' %}
+                                    <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-20 px-2 py-1 text-uppercase" style="font-size: 0.65rem;">Admin</span>
+                                {% elif u.role == 'operator' %}
+                                    <span class="badge bg-warning bg-opacity-10 text-warning border border-warning border-opacity-20 px-2 py-1 text-uppercase" style="font-size: 0.65rem;">Operator</span>
+                                {% else %}
+                                    <span class="badge bg-info bg-opacity-10 text-info border border-info border-opacity-20 px-2 py-1 text-uppercase" style="font-size: 0.65rem;">Viewer</span>
+                                {% endif %}
+                                
+                                {% if u.lock_until and u.lock_until > current_time %}
+                                    <form method="POST" class="d-inline ms-2">
+                                        <input type="hidden" name="action" value="unlock_user">
+                                        <input type="hidden" name="user_id" value="{{ u.id }}">
+                                        <button type="submit" class="btn btn-xs btn-outline-danger px-2 py-0 text-uppercase fw-bold" style="font-size: 0.6rem; letter-spacing: 0.5px;" title="Зняти блокування негайно">
+                                            <i class="bi bi-exclamation-triangle-fill me-1"></i> Blocked
+                                        </button>
+                                    </form>
+                                {% endif %}
+                            </td>
+                            <td class="py-3 text-end">
+                                <div class="d-flex justify-content-end gap-2">
+                                    <form method="POST" class="d-flex gap-1">
+                                        <input type="hidden" name="action" value="change_password">
+                                        <input type="hidden" name="user_id" value="{{ u.id }}">
+                                        <div class="input-group input-group-sm" style="max-width: 160px;">
+                                            <input type="password" name="new_password" class="form-control bg-dark border-secondary text-white" placeholder="Новий пароль" required>
+                                            <button type="submit" class="btn btn-outline-warning border-secondary" title="Оновити пароль">
+                                                <i class="bi bi-arrow-clockwise"></i>
+                                            </button>
+                                        </div>
+                                    </form>
+                                    
+                                    <form method="POST" onsubmit="return confirm('Ви впевнені, що хочете безповоротно видалити цей акаунт?');" class="d-inline">
+                                        <input type="hidden" name="action" value="delete_user">
+                                        <input type="hidden" name="user_id" value="{{ u.id }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Видалити обліковий запис">
+                                            <i class="bi bi-trash3"></i>
+                                        </button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<style>
+    /* Полное исправление видимости полей и лейблов в админке */
+    
+    /* 1. Делаем подписи (лейблы) ярко-белыми и четкими */
+    .card-berkut .form-label {
+        color: #ffffff !important;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+    }
+
+    /* 2. Делаем все поля ввода глубокого черного цвета вместо серого */
+    .card-berkut .form-content,
+    .card-berkut .form-control,
+    .card-berkut .form-select,
+    .card-berkut .input-group-text {
+        background-color: #0b0b0b !important;
+        border-color: #3d3d3d !important;
+        color: #ffffff !important;
+    }
+
+    /* 3. Делаем подсказки внутри полей (placeholder) читаемыми */
+    .card-berkut .form-control::placeholder {
+        color: #6c757d !important;
+    }
+
+    /* 4. Строгий фокус при клике на поле (подсветка красным) */
+    .card-berkut .form-control:focus, 
+    .card-berkut .form-select:focus {
+        background-color: #000000 !important;
+        border-color: #ff4a4a !important;
+        box-shadow: 0 0 0 0.25rem rgba(255, 74, 74, 0.15) !important;
+    }
+    
+    /* Подсветка иконки слева при фокусе на поле */
+    .card-berkut .input-group:focus-within .input-group-text {
+        border-color: #ff4a4a !important;
+        color: #ff4a4a !important;
+    }
+</style>
+{% endblock %}

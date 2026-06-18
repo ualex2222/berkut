@@ -1,0 +1,298 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css">
+
+<style>
+/* =======================
+   GLOBAL DARK BASE FIX
+======================= */
+body {
+    background: #0e0f12;
+}
+
+.logs-card {
+    background: #12141a;
+    border: 1px solid #232733;
+    border-radius: 12px;
+    padding: 18px;
+    color: #e6e6e6;
+}
+
+/* =======================
+   FIX WHITE TABLE CORE (ВАЖНО)
+======================= */
+table.dataTable {
+    background: transparent !important;
+    color: #e6e6e6 !important;
+}
+
+table.dataTable tbody {
+    background: transparent !important;
+}
+
+table.dataTable tbody tr {
+    background: #12141a !important;
+}
+
+table.dataTable tbody td {
+    background: transparent !important;
+    color: #e6e6e6 !important;
+    border-color: #232733 !important;
+}
+
+table.dataTable thead th {
+    background: #151925 !important;
+    color: #aab3c5 !important;
+    border-bottom: 1px solid #2a3142 !important;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* hover */
+table.dataTable tbody tr:hover {
+    background: #171c27 !important;
+}
+
+/* =======================
+   ROLE BADGE (мягкий холодный)
+======================= */
+.badge-role {
+    font-size: 11px;
+    padding: 5px 9px;
+    border-radius: 6px;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    border: 1px solid transparent;
+}
+
+.role-admin {
+    background: rgba(255, 77, 90, 0.10);
+    color: #ff8a93;
+    border-color: rgba(255, 77, 90, 0.25);
+}
+
+.role-operator {
+    background: rgba(77, 156, 255, 0.10);
+    color: #7fb6ff;
+    border-color: rgba(77, 156, 255, 0.25);
+}
+
+.role-viewer {
+    background: rgba(170, 170, 170, 0.08);
+    color: #c9c9c9;
+    border-color: rgba(200, 200, 200, 0.15);
+}
+
+/* =======================
+   ACTION BADGE (стиль SOC)
+======================= */
+.badge-action {
+    font-size: 11px;
+    padding: 5px 9px;
+    border-radius: 6px;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+}
+
+.action-create {
+    background: rgba(46, 204, 113, 0.10);
+    color: #6ee7a2;
+    border: 1px solid rgba(46, 204, 113, 0.25);
+}
+
+.action-delete {
+    background: rgba(255, 77, 90, 0.10);
+    color: #ff8a93;
+    border: 1px solid rgba(255, 77, 90, 0.25);
+}
+
+.action-move {
+    background: rgba(255, 193, 7, 0.10);
+    color: #ffd36e;
+    border: 1px solid rgba(255, 193, 7, 0.25);
+}
+
+/* =======================
+   SIDE (friend/hostile)
+======================= */
+.badge-side {
+    font-size: 11px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-weight: 600;
+}
+
+.side-friend {
+    background: rgba(77, 156, 255, 0.12);
+    color: #7fb6ff;
+    border: 1px solid rgba(77, 156, 255, 0.25);
+}
+
+.side-hostile {
+    background: rgba(255, 77, 90, 0.12);
+    color: #ff8a93;
+    border: 1px solid rgba(255, 77, 90, 0.25);
+}
+
+/* =======================
+   CONTROLS FIX
+======================= */
+.dataTables_filter input,
+.dataTables_length select {
+    background: #0f1117 !important;
+    border: 1px solid #2a3142 !important;
+    color: #e6e6e6 !important;
+    border-radius: 6px;
+}
+
+/* pagination */
+.dataTables_paginate .paginate_button {
+    background: transparent !important;
+    border: 1px solid #2a3142 !important;
+    color: #aab3c5 !important;
+    border-radius: 6px;
+}
+
+.dataTables_paginate .paginate_button.current {
+    background: #2b6cff !important;
+    color: #fff !important;
+    border: none !important;
+}
+
+/* =======================
+   ICONS
+======================= */
+.icon-img {
+    width: 26px;
+    height: 26px;
+    object-fit: contain;
+    filter: drop-shadow(0 0 2px rgba(0,0,0,0.6));
+}
+
+/* muted text */
+.small-muted {
+    color: #8b93a7;
+    font-size: 12px;
+}
+
+</style>
+
+<div class="logs-card">
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-0">📡 Журнал дій (Аудит)</h4>
+            <div class="small-muted">Оперативна система спостереження</div>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table id="logsTable" class="table table-borderless align-middle">
+            <thead>
+                <tr>
+                    <th>Користувач</th>
+                    <th>Роль</th>
+                    <th>Дія</th>
+                    <th>Сторона</th>
+                    <th>Об’єкт</th>
+                    <th>Категорія</th>
+                    <th>Іконка</th>
+                    <th>Коорд.</th>
+                    <th>Час</th>
+                </tr>
+            </thead>
+
+            <tbody>
+            {% for l in logs %}
+                <tr>
+
+                    <td><strong>{{ l.user }}</strong></td>
+
+                    <td>
+                        {% set role = l.role %}
+                        <span class="badge-role 
+                            {% if role == 'admin' %}role-admin
+                            {% elif role == 'operator' %}role-operator
+                            {% else %}role-viewer{% endif %}">
+                            {{ role }}
+                        </span>
+                    </td>
+
+                    <td>
+                        {% set a = l.action %}
+
+                        <span class="badge-action
+                            {% if a == 'CREATE' %}action-create
+                            {% elif a == 'DELETE' %}action-delete
+                            {% elif a == 'MOVE' %}action-move
+                            {% else %}action-move{% endif %}">
+                            {{ a }}
+                        </span>
+                    </td>
+
+                    <!-- FRIEND / HOSTILE -->
+                    <td>
+                        {% if "friend" in (l.details or "") %}
+                            <span class="badge-side side-friend">FRIEND</span>
+                        {% elif "hostile" in (l.details or "") %}
+                            <span class="badge-side side-hostile">HOSTILE</span>
+                        {% else %}
+                            <span class="badge bg-secondary">UNKNOWN</span>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {% if l.icon %}
+                            <img class="icon-img"
+                                 src="{{ url_for('static', filename=l.icon) }}">
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        <div style="font-weight:600;">
+                            {{ l.object_name or "—" }}
+                        </div>
+                    </td>
+
+                    <td class="small-muted">
+                        {{ l.category_name or "—" }}
+                    </td>
+
+                    <td class="text-warning small">
+                        {{ "%.5f"|format(l.lat) if l.lat else "" }},
+                        {{ "%.5f"|format(l.lng) if l.lng else "" }}
+                    </td>
+
+                    <td class="text-info small">
+                        {{ l.created_at }}
+                    </td>
+
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- DataTables -->
+<script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js"></script>
+
+<script>
+$(document).ready(function () {
+    $('#logsTable').DataTable({
+        pageLength: 25,
+        order: [[8, 'desc']],
+        responsive: true,
+        autoWidth: false
+    });
+});
+</script>
+
+{% endblock %}

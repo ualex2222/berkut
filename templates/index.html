@@ -1,0 +1,1693 @@
+{% extends 'base.html' %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mgrs@1.0.0/dist/mgrs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+
+<style>
+    .map-container {
+        height: calc(100vh - 60px);
+        display: flex;
+        position: relative;
+        background-color: #0d0d0d;
+    }
+    #map {
+        flex-grow: 1;
+        height: 100%;
+        background-color: #111;
+    }
+    
+    /* Бічна тактична панель управління */
+    .tactical-panel {
+        width: 340px;
+        min-width: 340px;
+        background-color: #141416;
+        border-left: 1px solid #2a2a2c;
+        height: 100%;
+        overflow-y: auto;
+        z-index: 10;
+        box-shadow: -5px 0 25px rgba(0,0,0,0.5);
+    }
+    
+    /* Підвищений контраст для текстів та міток */
+    .tactical-panel .form-label { color: #e0e0e3 !important; font-weight: 700; font-size: 0.75rem; letter-spacing: 0.5px; }
+    .tactical-panel .form-control, .tactical-panel .form-select {
+        background-color: #0a0a0c !important; border-color: #444446 !important; color: #ffffff !important; font-size: 0.85rem;
+    }
+    .tactical-panel .form-control:focus, .tactical-panel .form-select:focus {
+        border-color: #ff3b30 !important; box-shadow: 0 0 0 0.2rem rgba(255, 59, 48, 0.2) !important;
+    }
+    .text-muted-custom { color: #a1a1a6 !important; }
+
+    .btn-check:checked + .btn-outline-primary { background-color: #007aff !important; color: #fff; box-shadow: 0 0 10px rgba(0,122,255,0.5); }
+    .btn-check:checked + .btn-outline-danger { background-color: #ff3b30 !important; color: #fff; box-shadow: 0 0 10px rgba(255,59,48,0.5); }
+
+    /* ФІКСОВАНИЙ ТАКТИЧНИЙ ПЛАНШЕТ (HUD) ЗЛІВА ЗВЕРХУ */
+    #tactical-hud {
+        position: absolute;
+        top: 20px;
+        left: 70px;
+        width: 310px;
+        background: rgba(20, 20, 22, 0.95);
+        border: 1px solid #3a3a3c;
+        border-radius: 8px;
+        z-index: 1000;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+        backdrop-filter: blur(8px);
+        display: none; /* Прихований за замовчуванням */
+        transition: opacity 0.2s ease;
+    }
+
+    /* Стилізація військових маркерів на карті */
+    /* Надзвичайно акуратний, тонкий тактичний маркер */
+.military-marker-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    width: 30px !important;  /* Синхронізуємо з JS */
+    height: 30px !important; /* Синхронізуємо з JS */
+    border: 1.5px solid rgba(255, 255, 255, 0.6); /* Трохи товстіша рамка */
+    transition: transform 0.1s ease-in-out;
+    backdrop-filter: blur(1px);
+}
+/* Сама іконка всередині — маленька й чітка */
+.military-marker-wrapper img {
+    width: 22px;  /* Збільшено з 14 до 20 */
+    height: 22px;
+    object-fit: contain;
+    filter: drop-shadow(0 0 1px rgba(0,0,0,0.8));
+}
+
+/* Наші: акуратний синій фон із тонким підсвічуванням */
+.marker-friend {
+    background: rgba(0, 122, 255, 0.7); 
+    box-shadow: 0 0 8px rgba(0, 122, 255, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.3) !important;
+}
+
+/* Ворог: залишаємо агресивний червоний */
+.marker-hostile {
+    background: rgba(220, 53, 69, 0.7);
+    box-shadow: 0 0 8px rgba(220, 53, 69, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.3) !important;
+}
+
+/* При наведенні трохи підсвічуємо, але без фанатизму */
+.military-marker-wrapper:hover {
+    transform: scale(1.2);
+    filter: brightness(1.5) drop-shadow(0 0 2px #fff);
+    border-color: #ffffff !important;
+    box-shadow: 0 0 10px #ffffff;
+    z-index: 9999 !important;
+    cursor: pointer;
+}
+    
+    @media (max-width: 992px) {
+        .map-container { flex-direction: column; height: auto; }
+        #map { height: 50vh; }
+        .tactical-panel { width: 100%; min-width: 100%; height: auto; border-left: none; border-top: 1px solid #2a2a2c; }
+        #tactical-hud { top: 10px; left: 10px; width: calc(100% - 20px); }
+    }
+
+/* Контейнер для вибору типів */
+.type-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 8px;
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 5px;
+    background: #0a0a0c;
+    border: 1px solid #333;
+    border-radius: 6px;
+}
+
+.type-card {
+    background: #1c1c1e;
+    border: 1px solid #333;
+    padding: 8px;
+    text-align: center;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: 0.2s;
+}
+#btn-center-point {
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    border-color: #444;
+}
+#btn-center-point:hover {
+    background-color: #ff3b30;
+    color: white;
+}
+
+#btn-clear-all {
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    border-color: #444;
+}
+#btn-clear-all:hover {
+    background-color: #ff3b30;
+    color: white;
+}
+
+.type-card:hover { border-color: #ff3b30; background: #2a2a2c; }
+.type-card.active { border-color: #ff3b30; background: #3d1414; }
+
+.type-card img { width: 24px; height: 24px; margin-bottom: 4px; display: block; margin-left: auto; margin-right: auto; }
+.type-card span { font-size: 0.65rem; color: #fff; display: block; line-height: 1.1; }
+
+#route-color {
+    cursor: pointer;
+    font-weight: bold;
+    /* Это позволит видеть реальный цвет выбранного варианта в поле */
+}
+#layer-control-btn{
+    position:absolute;
+    top:80px;
+    left:10px;
+    z-index:2000;
+    width:35px;
+    height:35px;
+    background:#111;
+    border:1px solid #444;
+    border-radius:8px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    color:#fff;
+}
+
+#layer-control-btn:hover{
+    background:#222;
+}
+
+.layer-panel{
+    position:absolute;
+    top:120px;
+    left:10px;
+    z-index:2000;
+    background:#111;
+    border:1px solid #444;
+    padding:10px;
+    border-radius:8px;
+    display:none;
+    width:200px;
+    color:#fff;
+    font-size:13px;
+}
+
+.layer-panel label{
+    display:block;
+    margin-bottom:6px;
+    cursor:pointer;
+}
+
+.layer-title{
+    font-weight:bold;
+    margin-bottom:8px;
+    border-bottom:1px solid #333;
+    padding-bottom:5px;
+}
+
+/* =====================================
+   Тактические переключатели
+===================================== */
+
+.tactical-switch {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.tactical-switch:last-child {
+    border-bottom: none;
+}
+
+.tactical-switch .form-check-label {
+    color: #e5e5e5;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    flex-grow: 1;
+}
+
+.tactical-switch .form-check-input {
+    width: 42px;
+    height: 22px;
+    margin-left: 0;
+    margin-right: 10px;
+    cursor: pointer;
+
+    background-color: #2b2b2b;
+    border: 1px solid #555;
+
+    transition: all .25s ease;
+}
+
+/* Активное состояние */
+
+.tactical-switch .form-check-input:checked {
+    background-color: #dc3545;
+    border-color: #dc3545;
+
+    box-shadow:
+        0 0 8px rgba(220,53,69,.7),
+        0 0 15px rgba(220,53,69,.4);
+}
+
+/* Наведение */
+
+.tactical-switch:hover .form-check-label {
+    color: #ffffff;
+}
+
+.tactical-switch .form-check-input:hover {
+    border-color: #ff4d5e;
+}
+
+/* Фокус */
+
+.tactical-switch .form-check-input:focus {
+    box-shadow:
+        0 0 0 0.15rem rgba(220,53,69,.25),
+        0 0 10px rgba(220,53,69,.4);
+}
+
+/* Панель */
+
+.layer-panel {
+    background: rgba(15,15,15,0.97);
+    border: 1px solid #3a3a3a;
+    border-radius: 10px;
+    backdrop-filter: blur(10px);
+}
+
+.layer-title {
+    color: #dc3545;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 12px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="map-container">
+
+    <div id="layer-control-btn">
+        <i class="bi bi-gear-fill"></i>
+    </div>
+
+    <div id="layer-panel" class="layer-panel">
+
+        <div class="layer-title">
+            <i class="bi bi-layers-fill me-2"></i>
+            Слои карты
+        </div>
+
+        <div class="form-check form-switch tactical-switch">
+            <input class="form-check-input" type="checkbox" id="toggle-frontline">
+            <label class="form-check-label" for="toggle-frontline">
+                Полигоны фронта
+            </label>
+        </div>
+
+        <div class="form-check form-switch tactical-switch">
+            <input class="form-check-input" type="checkbox" id="toggle-deepstate-points">
+            <label class="form-check-label" for="toggle-deepstate-points">
+                Штабы и войска РБ
+            </label>
+        </div>
+
+        <div class="form-check form-switch tactical-switch">
+            <input class="form-check-input" type="checkbox" id="toggle-enemy">
+            <label class="form-check-label" for="toggle-enemy">
+                Войска РФ
+            </label>
+        </div>
+
+        <div class="form-check form-switch tactical-switch">
+            <input class="form-check-input" type="checkbox" id="toggle-illegal-belarus">
+            <label class="form-check-label" for="toggle-illegal-belarus">
+                НВФ в Беларуси
+            </label>
+        </div>
+
+        <div class="form-check form-switch tactical-switch">
+            <input class="form-check-input" type="checkbox" id="toggle-airports">
+            <label class="form-check-label" for="toggle-airports">
+                Аэродромы
+            </label>
+        </div>
+
+        <div class="form-check form-switch tactical-switch">
+            <input class="form-check-input" type="checkbox" id="toggle-arrows">
+            <label class="form-check-label" for="toggle-arrows">
+                Направления ударов
+            </label>
+        </div>
+
+    </div>
+    <div id="map"></div>
+    
+    <div id="tactical-hud" class="p-3">
+        <div class="d-flex justify-content-between align-items-center border-bottom border-secondary pb-2 mb-2">
+            <h6 id="hud-type-name" class="mb-0 text-warning fw-bold text-uppercase">Назва об'єкта</h6>
+            <span id="hud-side-badge" class="badge">Борт</span>
+        </div>
+        <div class="small text-white mb-2">
+            <div class="mb-1"><i class="bi bi-people-fill text-muted-custom me-2"></i><b>Склад:</b> <span id="hud-manpower" class="fw-bold">0</span> чол.</div>
+            <div class="mb-1"><i class="bi bi-geo-alt-fill text-muted-custom me-2"></i><b>Координати:</b> <span id="hud-coords" class="text-info font-monospace">0, 0</span></div>
+            <div class="mb-1">
+            <div class="mb-1">
+                <i class="bi bi-grid-3x3-gap-fill text-muted-custom me-2"></i> 
+                <b>MGRS:</b> <span id="hud-mgrs" class="text-info font-monospace">---</span>
+            </div>
+            <div class="mb-1">
+                <i class="bi bi-map-fill text-muted-custom me-2"></i> 
+                <b>УСК-2000 (X/Y):</b> <span id="hud-usk" class="text-info font-monospace">---</span>
+            </div>
+    <i class="bi bi-chevron-bar-up text-muted-custom me-2"></i> <b>Висота:</b> <span id="hud-alt" class="text-warning font-monospace">0</span> м.
+</div>
+            <div class="p-2 bg-black rounded border border-secondary my-2" style="font-size: 0.8rem; min-height: 45px;">
+                <b class="text-muted-custom">Подробиці:</b> <span id="hud-details">немає</span>
+            </div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center pt-2 border-top border-secondary small text-muted-custom" style="font-size: 0.7rem;">
+            <div><i class="bi bi-person-circle"></i> <span id="hud-author">--</span></div>
+            <div><i class="bi bi-clock"></i> <span id="hud-time">--</span></div>
+        </div>
+        <div id="hud-delete-container"></div>
+    </div>
+    
+    <div class="tactical-panel p-3 d-flex flex-column justify-content-between">
+        <div>
+                <div class="btn-group btn-group-sm w-100 mt-2" role="group">
+                    <button type="button" class="btn btn-secondary" id="btn-dark">Ніч</button>
+                    <button type="button" class="btn btn-outline-secondary" id="btn-light">День</button>
+                    <button type="button" class="btn btn-outline-secondary" id="btn-sat">Супутник</button>
+                    <button type="button" class="btn btn-outline-secondary" id="btn-topo">Топо</button>
+                </div>
+            
+            <form id="tactical-form">
+                <div class="row g-2 mb-2">
+    <div class="col-6">
+        <label class="form-label text-uppercase text-muted-custom">Широта (Lat)</label>
+        <input type="text" id="form-lat" class="form-control form-control-sm text-warning font-monospace fw-bold" placeholder="Lat">
+    </div>
+    <div class="col-6">
+        <label class="form-label text-uppercase text-muted-custom">Довгота (Lng)</label>
+        <input type="text" id="form-lng" class="form-control form-control-sm text-warning font-monospace fw-bold" placeholder="Lng">
+    </div>
+    
+    <div class="col-12">
+        <label class="form-label text-uppercase text-muted-custom">MGRS</label>
+        <input type="text" id="form-mgrs" class="form-control form-control-sm text-info font-monospace fw-bold" placeholder="MGRS Код">
+    </div>
+
+    <div class="col-6">
+        <label class="form-label text-uppercase text-muted-custom">УСК-2000 (X)</label>
+        <input type="text" id="form-usk-x" class="form-control form-control-sm text-info font-monospace fw-bold" placeholder="X">
+    </div>
+    <div class="col-6">
+        <label class="form-label text-uppercase text-muted-custom">УСК-2000 (Y)</label>
+        <input type="text" id="form-usk-y" class="form-control form-control-sm text-info font-monospace fw-bold" placeholder="Y">
+    </div>
+
+        <div class="col-6">
+            <button type="button" id="btn-clear-all" class="btn btn-sm btn-outline-secondary w-100 fw-bold">
+                <i class="bi bi-trash"></i>
+            </button>
+        </div>
+        <div class="col-6">
+            <button type="button" id="btn-center-point" class="btn btn-sm btn-outline-danger w-100 fw-bold">
+                <i class="bi bi-crosshair"></i>
+            </button>
+        </div>
+
+    <div class="col-12 mt-2">
+        <label class="text-secondary small">Висота (м)</label>
+        <input type="text" id="form-alt" class="form-control bg-dark text-white border-0" readonly>
+    </div>
+</div>
+                {% if session.get('role') in ['admin', 'operator'] %}
+                <div class="mb-3">
+                    <label class="form-label text-uppercase text-muted-custom">Приналежність цілі</label>
+                    <div class="d-flex gap-2">
+                        <input type="radio" class="btn-check" name="side" id="side-hostile" value="hostile" checked>
+                        <label class="btn btn-sm btn-outline-danger w-50 fw-bold" for="side-hostile">ЧУЖИЙ </label>
+
+                        <input type="radio" class="btn-check" name="side" id="side-friend" value="friend">
+                        <label class="btn btn-sm btn-outline-primary w-50 fw-bold" for="side-friend">СВIЙ </label>
+                    </div>
+                </div>
+
+                <div class="mb-2">
+                    <label class="form-label text-uppercase text-muted-custom">Група / Категорія</label>
+                    <select id="form-category-filter" class="form-select form-select-sm">
+                        <option value="ALL">-- ВСІ КАТЕГОРІЇ --</option>
+                        <option value="Жива сила та Фортифікація" data-icon="/static/infantry.png">Жива сила та Фортифікація</option>
+                        <option value="Логістика та Склади" data-icon="/static/warehouse.png">Логістика та Склади</option>
+                        <option value="Інженерні загородження" data-icon="/static/mine.png">Інженерні загородження</option>
+                        <option value="Авіація та БПЛА" data-icon="/static/drone.png">Авіація та БПЛА</option>
+                        <option value="Артилерія" data-icon="/static/artillery.png">Артилерія, РСЗВ та Ракетні комплекси</option>
+                        <option value="Бронетехніка та Транспорт" data-icon="/static/tank.png">Бронетехніка та Транспорт</option>
+                        <option value="Протиповітряна оборона" data-icon="/static/radar.png">Протиповітряна оборона</option>
+                        <option value="РЕБ та Радари" data-icon="/static/radar.png">РЕБ та Радари</option>
+                        <option value="Морські безпілотники та Флот" data-icon="/static/ship.png">Морські безпілотники та Флот</option>
+                        <option value="Інше" data-icon="/static/ship.png">Iнше</option>
+                    </select>
+                </div>
+
+                <div class="mb-2">
+                    <label class="form-label text-uppercase text-muted-custom">Оберіть тип об'єкта</label>
+                    <input type="text" id="type-search" class="form-control form-control-sm mb-2" placeholder="🔍 Пошук...">
+                    <div id="type-cards-container" class="type-grid"></div>
+                    <input type="hidden" id="form-type-id" required>
+                </div>
+
+                <div class="mb-2">
+                    <label class="form-label text-uppercase text-muted-custom">Особовий склад (к-сть)</label>
+                    <input type="number" id="form-manpower" class="form-control form-control-sm" min="0" value="0">
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label text-uppercase text-muted-custom">Додаткові деталі</label>
+                    <textarea id="form-details" class="form-control form-control-sm" rows="2" placeholder="Характер дій, склад техніки..."></textarea>
+                </div>
+                <button type="submit" class="btn btn-danger w-100 fw-bold text-uppercase py-2" style="font-size:0.85rem;">Нанести на карту</button>
+                {% else %}
+                <div class="alert alert-secondary py-3 text-center border-secondary bg-dark text-white" style="font-size: 0.8rem;">
+                    <i class="bi bi-eye-fill fs-4 d-block mb-1 text-warning"></i>
+                    Режим <strong>Черговий Секретар</strong>.<br>Внесення змін заблоковано.
+                </div>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mgrs/1.0.0/mgrs.min.js"></script>
+<script>
+    const currentUser = "{{ session.get('name') }}";
+    const currentUserRole = "{{ session.get('role') }}";
+
+
+    proj4.defs("EPSG:5561", "+proj=tmerc +lat_0=0 +lon_0=30 +k=0.9999 +x_0=5500000 +y_0=0 +ellps=krass +units=m +no_defs");
+
+    // Ініціалізація карти (Центр - Східний Напрямок України)
+    const map = L.map('map', { attributionControl: false }).setView([49.7075, 37.6158], 10);
+
+    const darkTiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 });
+    const lightTiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 19 });
+    darkTiles.addTo(map);
+
+// НОВІ: Супутник та Топографія
+// 1. Спутниковые снимки (базовый слой)
+const satTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Esri, Maxar, Earthstar Geographics'
+});
+
+// 2. Слой с подписями (Reference)
+const labelTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Esri, HERE, Garmin, FAO, NOAA'
+});
+
+// Объединяем спутник и подписи в одну группу
+const satWithLabels = L.layerGroup([satTiles, labelTiles]);
+
+const topoTiles = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+    maxZoom: 17,
+    attribution: 'Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap'
+});
+// ===============================
+// LAYERS
+// ===============================
+const deepstateLayer = L.layerGroup().addTo(map);
+const airfieldsLayer = L.layerGroup();
+const brigadesLayer = L.layerGroup();
+
+// ===============================
+// ICON LOGIC (CLEAN)
+// ===============================
+function getDeepStateIcon(feature) {
+
+    const desc = (feature.properties?.description || "").toLowerCase();
+    const name = (feature.properties?.name || "").toLowerCase();
+
+    // направления ударов
+    const arrowMatch = desc.match(/arrow_(\d+)/i);
+    if (arrowMatch) {
+        return `/static/deepstate/arrow_${arrowMatch[1]}.png`;
+    }
+
+    // аэродромы
+    if (
+        name.includes("аэродром") ||
+        name.includes("аеродром") ||
+        name.includes("airport") ||
+        name.includes("airfield")
+    ) {
+        return "/static/deepstate/airport.png";
+    }
+
+    // штабы
+    if (
+        desc.includes("headquarter") ||
+        desc.includes("hq") ||
+        name.includes("штаб")
+    ) {
+        return "/static/deepstate/headquarter.png";
+    }
+
+    // незаконные формирования РФ в Беларуси
+    if (desc.includes("eblorussia")) {
+        return "/static/deepstate/eblorussia.png";
+    }
+
+    // белорусские силы
+    if (desc.includes("iblorussia")) {
+        return "/static/deepstate/iblorussia.png";
+    }
+
+    // войска РФ
+    if (
+        desc.includes("enemy") ||
+        desc.includes("russian")
+    ) {
+        return "/static/deepstate/enemy.png";
+    }
+
+    return "/static/deepstate/base.png";
+}
+
+// ===============================
+// DEEPSTATE RENDER
+// ===============================
+const enemyLayer = L.layerGroup();
+const illegalBelarusLayer = L.layerGroup();
+const airportsLayer = L.layerGroup();
+const arrowsLayer = L.layerGroup();
+
+function renderDeepState(data) {
+
+    deepstatePointsLayer.clearLayers();
+    enemyLayer.clearLayers();
+    illegalBelarusLayer.clearLayers();
+    airportsLayer.clearLayers();
+    arrowsLayer.clearLayers();
+
+    if (!data || !data.features) return;
+
+    data.features.forEach(feature => {
+
+        if (!shouldShowFeature(feature)) return;
+
+        const coords = feature.geometry.coordinates;
+        const latlng = [coords[1], coords[0]];
+
+        const marker = L.marker(latlng, {
+            icon: L.divIcon({
+                className: "ds-point",
+                html: `<img src="${getDeepStateIcon(feature)}" style="width:20px;height:20px;">`,
+                iconSize: [20,20],
+                iconAnchor: [10,10]
+            })
+        });
+
+        const category = getFeatureCategory(feature);
+
+        switch(category) {
+
+            case "enemy":
+                enemyLayer.addLayer(marker);
+                break;
+
+            case "illegalBelarus":
+                illegalBelarusLayer.addLayer(marker);
+                break;
+
+            case "airport":
+                airportsLayer.addLayer(marker);
+                break;
+
+            case "arrows":
+                arrowsLayer.addLayer(marker);
+                break;
+
+            default:
+                deepstatePointsLayer.addLayer(marker);
+                break;
+        }
+
+        marker.on('click', async function(e) {
+            L.DomEvent.stopPropagation(e);
+
+            const props = feature.properties || {};
+            const latlng = marker.getLatLng();
+
+            // ===== CLEAN NAME =====
+            function cleanName(str) {
+                if (!str) return "DeepState";
+                return str
+                    .split("///")[0]
+                    .replace(/\{.*?\}/g, "")
+                    .trim();
+            }
+
+            const title = cleanName(props.name);
+
+            // ===== TITLE =====
+            document.getElementById('hud-type-name').textContent = title;
+
+            // badge
+            const badge = document.getElementById('hud-side-badge');
+            badge.textContent = "INTEL";
+            badge.className = "badge bg-warning text-dark";
+
+            // coords
+            document.getElementById('hud-coords').textContent =
+                `${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`;
+
+            // MGRS
+            try {
+                document.getElementById('hud-mgrs').textContent =
+                    mgrs.forward([latlng.lng, latlng.lat]);
+            } catch {
+                document.getElementById('hud-mgrs').textContent = "—";
+            }
+
+            // USK
+            try {
+                const usk = proj4("EPSG:4326", "EPSG:5561", [latlng.lng, latlng.lat]);
+                document.getElementById('hud-usk').textContent =
+                    `X: ${usk[0].toFixed(0)}, Y: ${usk[1].toFixed(0)}`;
+            } catch {
+                document.getElementById('hud-usk').textContent = "—";
+            }
+
+            // ===== ALTITUDE =====
+            document.getElementById('hud-alt').textContent = "запит...";
+
+            if (typeof getElevation === "function") {
+                try {
+                    const alt = await getElevation(latlng.lat, latlng.lng);
+                    document.getElementById('hud-alt').textContent =
+                        (alt && alt !== "N/A") ? alt : "0";
+                } catch {
+                    document.getElementById('hud-alt').textContent = "0";
+                }
+            } else {
+                document.getElementById('hud-alt').textContent = "—";
+            }
+
+            // ===== DETAILS CLEAN =====
+            const desc = (props.description || props.name || "")
+                .replace(/\{.*?\}/g, "")
+                .split("///")[0]
+                .trim();
+
+            document.getElementById('hud-details').textContent = desc || "—";
+
+            // author
+            document.getElementById('hud-author').textContent = "DeepState";
+
+            // date
+            const today = new Date().toLocaleDateString('uk-UA');
+            document.getElementById('hud-time').textContent = props.time || today;
+
+            // cleanup
+            document.getElementById('hud-delete-container').innerHTML = "";
+
+            // show HUD
+            document.getElementById('tactical-hud').style.display = 'block';
+        });
+    });
+}
+
+function shouldShowFeature(feature) {
+
+    const name = (feature.properties?.name || "").toLowerCase();
+    const desc = (feature.properties?.description || "").toLowerCase();
+
+    if (name.includes("kyiv")) return false;
+    if (name.includes("київ")) return false;
+
+    if (name.includes("moscow")) return false;
+    if (name.includes("москва")) return false;
+
+    if (name.includes("мінськ")) return false;
+    if (name.includes("minsk")) return false;
+
+    if (name.includes("пхеньян")) return false;
+    if (name.includes("pyongyang")) return false;
+
+    if (name.includes("Кримський міст")) return false;
+
+    if (desc.includes("clown")) return false;
+
+    return true;
+}
+
+// ===============================
+// FRONTLINE STYLE
+// ===============================
+function styleFrontline(feature) {
+
+    const p = feature.properties || {};
+
+    return {
+        color: p.stroke || "#000000",
+        weight: p["stroke-width"] ?? 1,
+        opacity: p["stroke-opacity"] ?? 1,
+        fillColor: p.fill || "#ff0000",
+        fillOpacity: p["fill-opacity"] ?? 0.3
+    };
+}
+
+// ===============================
+// CLEAN NAME
+// ===============================
+function cleanZoneName(name) {
+    if (!name) return "";
+
+    return name
+        .split("///")[0]
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function getTodayDate() {
+    const d = new Date();
+    return d.toLocaleString('uk-UA', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    });
+}
+
+// ===============================
+// FRONTLINE LAYER
+// ===============================
+const frontlineLayer = L.geoJSON(null, {
+    style: styleFrontline,
+    interactive: false
+});
+
+const deepstatePointsLayer = L.layerGroup();
+
+function getFeatureCategory(feature) {
+
+    const desc = (feature.properties?.description || "").toLowerCase();
+    const name = (feature.properties?.name || "").toLowerCase();
+
+    if (desc.includes("arrow_"))
+        return "arrows";
+
+    if (name.includes("аэродром") ||
+        name.includes("airfield") ||
+        name.includes("airport"))
+        return "airport";
+
+    if (desc.includes("iblorussia"))
+        return "belarus";
+
+    if (desc.includes("eblorussia"))
+        return "illegalBelarus";
+
+    if (desc.includes("enemy"))
+        return "enemy";
+
+    return null;
+}
+
+frontlineLayer.bringToBack();
+
+// ===============================
+// FILTER FRONTLINE (NO MUTATION)
+// ===============================
+function filterFrontline(geojson) {
+
+    if (!geojson || !geojson.features) return geojson;
+
+    return {
+        ...geojson,
+        features: geojson.features.filter(f => {
+
+            // Оставляем только полигоны
+            return (
+                f.geometry &&
+                (f.geometry.type === "Polygon" ||
+                 f.geometry.type === "MultiPolygon")
+            );
+        })
+    };
+}
+
+function getPoints(geojson) {
+    return {
+        ...geojson,
+        features: geojson.features.filter(f =>
+            f.geometry &&
+            f.geometry.type === "Point"
+        )
+    };
+}
+
+// ===============================
+// LOAD FRONTLINE
+// ===============================
+async function loadFrontline() {
+
+    try {
+        const response = await fetch('/api/frontline');
+        const data = await response.json();
+
+        const cleaned = filterFrontline(data.map);
+        const points = getPoints(data.map);
+        renderDeepState(points);
+
+        frontlineLayer.clearLayers();
+        frontlineLayer.addData(cleaned);
+        
+
+        if (document.getElementById("toggle-frontline").checked) {
+            frontlineLayer.addTo(map);
+        }
+
+        console.log(
+            "Фронт обновлён:",
+            data.datetime,
+            "объектов:",
+            data.map?.features?.length || 0
+        );
+
+    } catch (err) {
+        console.error("Frontline load error:", err);
+    }
+}
+
+    // Перемикання тем оформлення карти
+    const layers = {
+    'btn-dark': darkTiles,
+    'btn-light': lightTiles,
+    'btn-sat': satWithLabels,
+    'btn-topo': topoTiles
+};
+
+Object.keys(layers).forEach(btnId => {
+    document.getElementById(btnId).addEventListener('click', function() {
+        // 1. Прибираємо всі шари
+        Object.values(layers).forEach(layer => map.removeLayer(layer));
+        
+        // 2. Додаємо вибраний
+        layers[btnId].addTo(map);
+        
+        // 3. Оновлюємо активні кнопки
+        document.querySelectorAll('.btn-group button').forEach(b => b.classList.replace('btn-secondary', 'btn-outline-secondary'));
+        this.classList.replace('btn-outline-secondary', 'btn-secondary');
+    });
+});
+
+    let currentTempMarker = null;
+    let allTypesData = [];
+    let activeMarkers = {}; 
+
+// 1. Повертає назву файлу картинки залежно від категорії або типу об'єкта
+// Працює як фолбек, якщо з бази чомусь не прийшло готове ім'я файлу
+function getTacticalIconPath(obj) {
+    // Додаємо obj.nato_code в перелік полів для пошуку
+    const iconName = obj.icon_file || obj.nato_code || obj.sidc || obj.code; 
+
+    // Перевіряємо, чи отримали ми рядок, що закінчується на .png
+    if (typeof iconName === 'string' && iconName.endsWith('.png')) {
+        return `/static/${iconName}`;
+    }
+
+    // Якщо все ще пусто — дефолт
+    return "/static/base.png";
+}
+
+// 2. Створення кастомного HTML-маркера з ефектом HUD та крутої підсвітки
+function createMilitaryIcon(obj) {
+    const sideClass = obj.side === 'friend' ? 'marker-friend' : 'marker-hostile';
+    const iconUrl = getTacticalIconPath(obj);
+    
+    return L.divIcon({
+        className: `military-marker-wrapper ${sideClass}`,
+        html: `<img src="${iconUrl}" alt="icon" onerror="this.src='/static/base.png'">`,
+        iconSize: [26, 26],     // Маленький розмір під новий CSS
+        iconAnchor: [13, 13]    // Строге центрування (половина від 26)
+    });
+}
+
+async function getElevation(lat, lng) {
+    try {
+        // Запит до вашого власного сервера (Flask)
+        // Локальний сервер обробляє координати і дістає висоту з ваших .hgt файлів
+        const response = await fetch(`/api/elevation?lat=${lat}&lng=${lng}`);
+        
+        if (!response.ok) throw new Error('Помилка сервера');
+        
+        const data = await response.json();
+        return data.altitude; // Повертає число (метри)
+    } catch (error) {
+        console.error("Не вдалося отримати висоту з локальної бази:", error);
+        return "N/A";
+    }
+}
+
+    // Функція відображення об'єкта на карті та зв'язування з HUD-планшетом
+    async function renderObjectOnMap(obj) {
+    // ДИАГНОСТИКА: Открой консоль браузера (F12 -> Console), чтобы увидеть, что прилетает из базы
+    console.log("Данные объекта из БД:", obj); 
+
+    if (activeMarkers[obj.id]) {
+        activeMarkers[obj.id].setLatLng([obj.lat, obj.lng]);
+        return;
+    }
+
+    // Передаем весь объект 'obj' вместо одной категории
+    const marker = L.marker([obj.lat, obj.lng], { 
+        icon: createMilitaryIcon(obj) 
+    }).addTo(map);
+    
+    activeMarkers[obj.id] = marker;
+
+    // Подія натискання на маркер — відкриває HUD-планшет
+    marker.on('click', async function(e) {
+        L.DomEvent.stopPropagation(e);
+        
+        document.getElementById('hud-type-name').textContent = obj.type_name;
+        const badge = document.getElementById('hud-side-badge');
+        badge.textContent = obj.side === 'friend' ? 'НАШІ' : 'ВОРОГ';
+        badge.className = obj.side === 'friend' ? 'badge bg-primary' : 'badge bg-danger';
+
+        document.getElementById('hud-manpower').textContent = obj.manpower;
+        document.getElementById('hud-coords').textContent = `${obj.lat.toFixed(5)}, ${obj.lng.toFixed(5)}`;
+        const mgrsVal = mgrs.forward([obj.lng, obj.lat]);
+        const usk = proj4("EPSG:4326", "EPSG:5561", [obj.lng, obj.lat]);
+        
+        document.getElementById('hud-mgrs').textContent = mgrsVal;
+        document.getElementById('hud-usk').textContent = `X: ${usk[0].toFixed(0)}, Y: ${usk[1].toFixed(0)}`;
+        const altSpan = document.getElementById('hud-alt');
+        altSpan.textContent = "запит..."; // Індикатор завантаження
+        
+        const altitude = await getElevation(obj.lat, obj.lng);
+        altSpan.textContent = altitude !== "N/A" ? altitude : "0";
+        document.getElementById('hud-details').textContent = obj.details || 'немає додаткових відомостей';
+        document.getElementById('hud-author').textContent = obj.created_by;
+        document.getElementById('hud-time').textContent = obj.created_at;
+
+        const delContainer = document.getElementById('hud-delete-container');
+        delContainer.innerHTML = '';
+        if (currentUserRole === 'admin' || obj.created_by === currentUser) {
+            delContainer.innerHTML = `
+                <button onclick="deleteObject(${obj.id})" class="btn btn-danger btn-sm w-100 mt-3 fw-bold text-uppercase py-1" style="font-size:0.75rem;">
+                    <i class="bi bi-trash3-fill me-1"></i> Зняти з обліку
+                </button>`;
+        }
+
+        document.getElementById('tactical-hud').style.display = 'block';
+    });
+}
+
+    // Закриття HUD при натисканні на вільну зону карти
+    map.on('click', function() {
+        document.getElementById('tactical-hud').style.display = 'none';
+    });
+
+    // Розумне динамічне заповнення списку типів маркерів
+    function populateTypeSelect() {
+    const container = document.getElementById('type-cards-container');
+    const hiddenInput = document.getElementById('form-type-id');
+    const selectedCategory = document.getElementById('form-category-filter').value;
+    const searchText = document.getElementById('type-search').value.toLowerCase();
+    
+    container.innerHTML = '';
+    
+    const filtered = allTypesData.filter(t => {
+        const matchesCategory = (selectedCategory === 'ALL' || t.category === selectedCategory);
+        const matchesSearch = t.name.toLowerCase().includes(searchText);
+        return matchesCategory && matchesSearch;
+    });
+
+    filtered.forEach(t => {
+        const card = document.createElement('div');
+        card.className = 'type-card';
+        card.innerHTML = `
+            <img src="/static/${t.nato_code || 'base.png'}" onerror="this.src='/static/base.png'">
+            <span>${t.name}</span>
+        `;
+        card.onclick = () => {
+            // При виборі знімаємо активність з інших
+            document.querySelectorAll('.type-card').forEach(c => c.classList.remove('active'));
+            card.classList.add('active');
+            hiddenInput.value = t.id;
+        };
+        container.appendChild(card);
+    });
+}
+
+    if (document.getElementById('form-category-filter')) document.getElementById('form-category-filter').addEventListener('change', populateTypeSelect);
+    if (document.getElementById('type-search')) document.getElementById('type-search').addEventListener('input', populateTypeSelect);
+
+document.getElementById('btn-clear-all').addEventListener('click', function() {
+    // 1. Очищаємо всі поля
+    const fields = ['form-lat', 'form-lng', 'form-mgrs', 'form-usk-x', 'form-usk-y', 'form-alt'];
+    fields.forEach(id => {
+        document.getElementById(id).value = '';
+    });
+
+    // 2. Видаляємо тимчасовий маркер з карти
+    if (currentTempMarker) {
+        map.removeLayer(currentTempMarker);
+        currentTempMarker = null;
+    }
+    
+    // 3. Якщо у вас є вимірювальна лінійка, скидаємо і її
+    if (typeof resetMeasure === 'function') {
+        resetMeasure();
+    }
+    
+    console.log("Форму очищено.");
+});
+
+    document.getElementById('btn-center-point').addEventListener('click', async function() {
+    // 1. Збираємо значення з полів
+    const latInput = document.getElementById('form-lat').value;
+    const lngInput = document.getElementById('form-lng').value;
+    const mgrsInput = document.getElementById('form-mgrs').value;
+    const uskX = document.getElementById('form-usk-x').value;
+    const uskY = document.getElementById('form-usk-y').value;
+
+    let lat, lng;
+
+    // 2. Визначаємо, що саме введено (пріоритет: Lat/Lng -> MGRS -> USK)
+    try {
+        if (latInput && lngInput) {
+            lat = parseFloat(latInput);
+            lng = parseFloat(lngInput);
+        } else if (mgrsInput) {
+            const coords = mgrs.inverse(mgrsInput);
+            lat = coords[1];
+            lng = coords[0];
+        } else if (uskX && uskY) {
+            const coords = proj4("EPSG:5561", "EPSG:4326", [parseFloat(uskX), parseFloat(uskY)]);
+            lat = coords[1];
+            lng = coords[0];
+        } else {
+            alert("Будь ласка, введіть координати в будь-яке з полів!");
+            return;
+        }
+
+        // 3. Оновлюємо все і центруємо
+        await updateAllCoords(lat, lng);
+        map.setView([lat, lng], 14);
+
+    } catch (e) {
+        console.error(e);
+        alert("Помилка обробки координат. Перевірте правильність введення.");
+    }
+});
+
+    // Первинне завантаження карти з БД
+    function loadMapDataFromServer() {
+        fetch('/api/map-data')
+            .then(res => res.json())
+            .then(data => {
+                allTypesData = data.types;
+                if(document.getElementById('form-type-id') && document.getElementById('form-type-id').children.length === 0){
+                    populateTypeSelect();
+                }
+                
+                // Перевірка видалених маркерів: якщо маркер пропав з БД, прибираємо його
+                const activeIdsInDb = data.objects.map(o => o.id);
+                Object.keys(activeMarkers).forEach(id => {
+                    if (!activeIdsInDb.includes(parseInt(id))) {
+                        map.removeLayer(activeMarkers[id]);
+                        delete activeMarkers[id];
+                    }
+                });
+
+                // Малюємо нові або оновлюємо поточні позиції точок
+                data.objects.forEach(obj => renderObjectOnMap(obj));
+            })
+            .catch(err => console.error("Помилка синхронізації бази:", err));
+    }
+
+    // Старт первинного завантаження
+    loadMapDataFromServer();
+
+    // КОНТУР АВТО-ОБНОВЛЕННЯ: Раз на 4 секунди перевіряємо базу, щоб у ВСІХ людей з'являлись маркери
+    setInterval(loadMapDataFromServer, 4000);
+
+    // Функція для встановлення тимчасової точки (використовується в двох місцях)
+async function updateAllCoords(lat, lng) {
+    const latN = parseFloat(lat);
+    const lngN = parseFloat(lng);
+    const latLng = [latN, lngN];
+
+    // 1. Оновлюємо поля Decimal
+    document.getElementById('form-lat').value = latN.toFixed(6);
+    document.getElementById('form-lng').value = lngN.toFixed(6);
+
+    // 2. Конвертуємо та оновлюємо MGRS
+    document.getElementById('form-mgrs').value = mgrs.forward([lngN, latN]);
+
+    // 3. Конвертуємо та оновлюємо УСК-2000
+    const usk = proj4("EPSG:4326", "EPSG:5561", [lngN, latN]);
+    document.getElementById('form-usk-x').value = usk[0].toFixed(2);
+    document.getElementById('form-usk-y').value = usk[1].toFixed(2);
+
+    // 4. Висота
+    document.getElementById('form-alt').value = "Запит...";
+    const altitude = await getElevation(latN, lngN);
+    document.getElementById('form-alt').value = altitude !== "N/A" ? altitude : "0";
+
+    // 5. Маркер
+    if (currentTempMarker) {
+        currentTempMarker.setLatLng(latLng);
+    } else {
+        const tempIcon = L.divIcon({
+            className: 'temp-marker',
+            html: '<div style="background-color: #ffc107; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 10px #ffc107;"></div>',
+            iconSize: [14, 14], iconAnchor: [7, 7]
+        });
+        currentTempMarker = L.marker(latLng, { icon: tempIcon }).addTo(map);
+    }
+    return latLng;
+}
+
+
+
+    // Клік по карті для встановлення тимчасового жовтого покажчика
+    map.on('click', async function(e) {
+    if(!document.getElementById('form-lat')) return;
+    await updateAllCoords(e.latlng.lat, e.latlng.lng);
+});
+
+    // НАЙКРАЩЕ СТВОРЕННЯ ТОЧКИ: Миттєве локальне нанесення
+    const form = document.getElementById('tactical-form');
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const lat = parseFloat(document.getElementById('form-lat').value);
+            const lng = parseFloat(document.getElementById('form-lng').value);
+            const typeSelect = document.getElementById('form-type-id');
+            
+            if(!lat || !lng) { alert("Будь ласка, вкажіть локацію на карті!"); return; }
+            if(!typeSelect.value) { alert("Оберіть тип об'єкта зі списку!"); return; }
+
+            const data = {
+                lat: lat, lng: lng,
+                side: document.querySelector('input[name="side"]:checked').value,
+                type_id: parseInt(typeSelect.value),
+                manpower: parseInt(document.getElementById('form-manpower').value) || 0,
+                details: document.getElementById('form-details').value
+            };
+
+            fetch('/api/objects', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(res => res.json())
+            .then(resData => {
+                if (resData.status === 'success' || resData.object) {
+                    const newObj = resData.object;
+                    
+                    // Локальний рендер БЕЗ очікування перезавантаження сторінки
+                    renderObjectOnMap(newObj); 
+                    
+                    if(currentTempMarker) { map.removeLayer(currentTempMarker); currentTempMarker = null; }
+                    form.reset();
+                    document.getElementById('form-lat').value = '';
+                    document.getElementById('form-lng').value = '';
+                    document.getElementById('form-mgrs').value = '';
+                    document.getElementById('form-usk-x').value = '';
+                    document.getElementById('form-usk-y').value = '';
+                    document.getElementById('form-alt').value = '';
+                    populateTypeSelect();
+                } else {
+                    alert("Помилка: " + (resData.error || "Невідома відповідь сервера"));
+                }
+            })
+            .catch(err => {
+                console.error("Помилка відправки об'єкта:", err);
+                alert("Помилка зв'язку з сервером.");
+            });
+        });
+    }
+
+    // МИТТЄВЕ ВИДАЛЕННЯ ТОЧКИ: Локально чиститься відразу з екрану
+    window.deleteObject = function(id) {
+        if (!confirm("Дійсно зняти тактичний маркер з обліку карти?")) return;
+
+        fetch(`/api/objects/${id}`, { method: 'DELETE' })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                if (activeMarkers[id]) {
+                    map.removeLayer(activeMarkers[id]);
+                    delete activeMarkers[id];
+                }
+                document.getElementById('tactical-hud').style.display = 'none'; // Закриваємо HUD
+                console.log(`Маркер №${id} знято локально.`);
+            } else if (data.error) {
+                alert("Помилка видалення: " + data.error);
+            }
+        })
+        .catch(err => console.error("Помилка видалення:", err));
+    };
+
+    // СИНХРОНІЗАЦІЯ ВЕБ-СОКЕТІВ (Для моментальної взаємодії між операторами)
+    const socket = io(window.location.protocol + '//' + window.location.host);
+
+    socket.on('map_action', function(data) {
+        if (data.action === 'create') {
+            renderObjectOnMap(data);
+        } else if (data.action === 'delete') {
+            if (activeMarkers[data.id]) {
+                map.removeLayer(activeMarkers[data.id]);
+                delete activeMarkers[data.id];
+                // Якщо закритий маркер зараз відкритий в HUD — ховаємо його
+                document.getElementById('tactical-hud').style.display = 'none';
+            }
+        } else if (data.action === 'update') {
+            const markerToUpdate = activeMarkers[data.id];
+            if (markerToUpdate) {
+                markerToUpdate.setLatLng([data.lat, data.lng]);
+            }
+        }
+    });
+
+
+// --- КОНФІГУРАЦІЯ ---
+// --- КОНФІГУРАЦІЯ ---
+let measureMode = null; 
+let measurePoints = [];
+let measureLines = []; // Масив для зберігання всіх ліній
+
+const RulerControl = L.Control.extend({
+    options: { position: 'topright' },
+    onAdd: function(map) {
+        const div = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+        div.innerHTML = `
+            <a href="#" id="btn-dist" title="Відстань" style="display:flex; align-items:center; justify-content:center; width:30px; height:30px;"><i class="bi bi-rulers"></i></a>
+            <a href="#" id="btn-prof" title="Профіль" style="display:flex; align-items:center; justify-content:center; width:30px; height:30px;"><i class="bi bi-graph-up"></i></a>
+            <a href="#" id="btn-route" title="Створити маршрут" style="display:flex; align-items:center; justify-content:center; width:30px; height:30px;"><i class="bi bi-bezier2"></i></a>
+            <a href="#" id="btn-azimuth" title="Замір азимуту" style="display:flex; align-items:center; justify-content:center; width:30px; height:30px;"><i class="bi bi-compass"></i></a>
+            <a href="#" id="btn-clear" title="Очистити" style="display:flex; align-items:center; justify-content:center; width:30px; height:30px; color:red;"><i class="bi bi-trash"></i></a>
+        `;
+        div.querySelector('#btn-dist').onclick = (e) => { L.DomEvent.stopPropagation(e); toggleMode('distance'); };
+        div.querySelector('#btn-prof').onclick = (e) => { L.DomEvent.stopPropagation(e); toggleMode('profile'); };
+        div.querySelector('#btn-clear').onclick = (e) => { L.DomEvent.stopPropagation(e); resetMeasure(); };
+        return div;
+    }
+});
+map.addControl(new RulerControl());
+
+function toggleMode(mode) {
+    measureMode = (measureMode === mode) ? null : mode;
+    map.getContainer().style.cursor = measureMode ? 'crosshair' : '';
+    
+    // Підсвічування активної кнопки
+    document.getElementById('btn-dist').style.backgroundColor = (measureMode === 'distance') ? '#0dcaf0' : '';
+    document.getElementById('btn-dist').style.color = (measureMode === 'distance') ? '#fff' : '';
+    document.getElementById('btn-prof').style.backgroundColor = (measureMode === 'profile') ? '#0dcaf0' : '';
+    document.getElementById('btn-prof').style.color = (measureMode === 'profile') ? '#fff' : '';
+    
+    measurePoints = []; // Скидаємо точки при зміні режиму
+}
+
+// --- ЛОГІКА КЛІКУ ---
+map.on('click', async function(e) {
+    if (!measureMode) return;
+
+    measurePoints.push(e.latlng);
+
+    if (measurePoints.length === 2) {
+        const newLine = L.polyline(measurePoints, { color: '#0dcaf0', weight: 4 }).addTo(map);
+        measureLines.push(newLine); // Тепер ми зберігаємо лінію
+        
+        const distMeters = measurePoints[0].distanceTo(measurePoints[1]);
+        const distKm = (distMeters / 1000).toFixed(2);
+
+        if (measureMode === 'distance') {
+            L.popup().setLatLng(e.latlng).setContent(`Відстань: ${distKm} км`).openOn(map);
+        } 
+        else if (measureMode === 'profile') {
+            const steps = 40;
+            const profileCoords = [];
+            for (let i = 0; i <= steps; i++) {
+                profileCoords.push({
+                    lat: measurePoints[0].lat + (measurePoints[1].lat - measurePoints[0].lat) * (i / steps),
+                    lng: measurePoints[0].lng + (measurePoints[1].lng - measurePoints[0].lng) * (i / steps)
+                });
+            }
+            
+            const response = await fetch('/api/profile', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ points: profileCoords })
+            });
+            const { profile } = await response.json();
+            
+            const canvas = document.createElement('canvas');
+            canvas.width = 300; canvas.height = 150;
+            L.popup({maxWidth: 350}).setLatLng(e.latlng).setContent(canvas).openOn(map);
+            
+            new Chart(canvas, {
+                type: 'line',
+                data: {
+                    labels: profile.map((_, i) => (distKm * (i / steps)).toFixed(2) + ' км'),
+                    datasets: [{ label: 'Висота (м)', data: profile, borderColor: '#0dcaf0', fill: true }]
+                }
+            });
+        }
+        measurePoints = [];
+    }
+});
+
+function resetMeasure() {
+    // Видаляємо ВСІ лінії
+    measureLines.forEach(line => map.removeLayer(line));
+    measureLines = []; 
+    measurePoints = [];
+    map.closePopup();
+    
+    // Скидаємо кнопки
+    measureMode = null;
+    document.getElementById('btn-dist').style.backgroundColor = '';
+    document.getElementById('btn-dist').style.color = '';
+    document.getElementById('btn-prof').style.backgroundColor = '';
+    document.getElementById('btn-prof').style.color = '';
+    map.getContainer().style.cursor = '';
+}
+
+// МАРШРУТЫ
+
+// --- ЛОГІКА МАРШРУТІВ ---
+let isDrawingRoute = false;
+let routePoints = [];
+let routeLine = null;
+let activeRouteLines = {}; // Для видалення маршрутів з карти
+let pendingRouteData = null;
+
+// Ініціалізація кнопки
+document.getElementById('btn-route').addEventListener('click', function(e) {
+    if (currentUserRole !== 'admin' && currentUserRole !== 'operator') {
+        alert("У вас немає прав на створення маршрутів.");
+        return;
+    }
+    L.DomEvent.stopPropagation(e);
+    isDrawingRoute = !isDrawingRoute;
+    
+    this.style.backgroundColor = isDrawingRoute ? '#dc3545' : '';
+    map.getContainer().style.cursor = isDrawingRoute ? 'crosshair' : '';
+    
+    if (!isDrawingRoute && routePoints.length > 1) {
+        // Вместо prompt открываем модалку
+        new bootstrap.Modal(document.getElementById('routeModal')).show();
+    } else if (!isDrawingRoute) {
+        resetRouteDrawing();
+    }
+});
+
+// Функция подтверждения сохранения
+function confirmRouteSave() {
+    const name = document.getElementById('route-name').value;
+    const color = document.querySelector('input[name="route-color"]:checked').value;
+    
+    if (name) {
+        saveRouteToDb(name, color, routePoints);
+        bootstrap.Modal.getInstance(document.getElementById('routeModal')).hide();
+        resetRouteDrawing();
+    } else {
+        alert("Введіть назву!");
+    }
+}
+
+
+// Клік по карті під час малювання
+map.on('click', function(e) {
+    if (!isDrawingRoute) return;
+    routePoints.push(e.latlng);
+    
+    if (routeLine) map.removeLayer(routeLine);
+    routeLine = L.polyline(routePoints, { color: '#dc3545', weight: 4 }).addTo(map);
+});
+
+function resetRouteDrawing() {
+    if (routeLine) map.removeLayer(routeLine);
+    routePoints = [];
+    routeLine = null;
+    isDrawingRoute = false;
+    map.getContainer().style.cursor = '';
+    document.getElementById('btn-route').style.backgroundColor = '';
+    bootstrap.Modal.getInstance(document.getElementById('routeModal')).hide();
+}
+
+function saveRouteToDb(name, color, points) {
+    fetch('/api/routes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, color, points })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === 'success') {
+            loadRoutesFromServer(); // Оновлюємо відображення
+        }
+    });
+}
+
+// Завантаження та відображення маршрутів
+function loadRoutesFromServer() {
+    fetch('/api/routes')
+        .then(res => res.json())
+        .then(routes => {
+            // Очищаємо старі маршрути
+            Object.values(activeRouteLines).forEach(layer => map.removeLayer(layer));
+            activeRouteLines = {};
+
+            routes.forEach(route => {
+                const latlngs = route.points.map(p => [p.lat, p.lng]);
+                const poly = L.polyline(latlngs, { color: route.color, weight: 4 }).addTo(map);
+                
+                // Додаємо можливість видалення
+                poly.bindPopup(`
+                    <b>${route.name}</b><br>
+                    <small>Автор: ${route.created_by}</small><br>
+                    <button class="btn btn-danger btn-sm mt-2" onclick="deleteRoute(${route.id})">Видалити</button>
+                `);
+                
+                activeRouteLines[route.id] = poly;
+            });
+        });
+}
+
+window.deleteRoute = function(id) {
+    if (!confirm("Видалити маршрут?")) return;
+    fetch(`/api/routes/${id}`, { method: 'DELETE' })
+        .then(() => loadRoutesFromServer());
+};
+
+// Завантажуємо маршрути при старті
+loadRoutesFromServer();
+setInterval(loadRoutesFromServer, 4000);
+
+// --- ЛОГІКА АЗИМУТУ ---
+let azimuthMode = false;
+let azimuthPoints = [];
+let azimuthLine = null;
+
+document.getElementById('btn-azimuth').addEventListener('click', function(e) {
+    L.DomEvent.stopPropagation(e);
+    azimuthMode = !azimuthMode;
+    
+    // Скидаємо інші режими
+    if(typeof resetMeasure === 'function') resetMeasure();
+    
+    this.style.backgroundColor = azimuthMode ? '#198754' : '';
+    map.getContainer().style.cursor = azimuthMode ? 'crosshair' : '';
+    azimuthPoints = [];
+});
+
+map.on('click', function(e) {
+    if (!azimuthMode) return;
+
+    azimuthPoints.push(e.latlng);
+
+    if (azimuthPoints.length === 2) {
+        const p1 = azimuthPoints[0];
+        const p2 = azimuthPoints[1];
+        
+        // Малюємо лінію
+        if (azimuthLine) map.removeLayer(azimuthLine);
+        azimuthLine = L.polyline([p1, p2], { color: '#198754', weight: 4, dashArray: '10, 10' }).addTo(map);
+        
+        // Розрахунок
+        const dist = (p1.distanceTo(p2) / 1000).toFixed(2);
+        const az = calculateAzimuth(p1.lat, p1.lng, p2.lat, p2.lng).toFixed(0);
+        
+        // Попап з результатом
+        L.popup().setLatLng(p2)
+         .setContent(`<b>Азимут: ${az}°</b><br>Відстань: ${dist} км`)
+         .openOn(map);
+        
+        // Скидаємо для наступного заміру
+        azimuthPoints = [];
+    }
+});
+
+// Допоміжна функція (вона в тебе вже має бути, якщо ні - додай)
+function calculateAzimuth(lat1, lng1, lat2, lng2) {
+    const toRad = (deg) => deg * Math.PI / 180;
+    const toDeg = (rad) => rad * 180 / Math.PI;
+    const dLon = toRad(lng2 - lng1);
+    const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+    const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+              Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+    return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+// ===============================
+// INITIAL LOAD
+// ===============================
+loadFrontline();
+setInterval(loadFrontline, 300000);
+
+// ===============================
+// PANEL TOGGLE
+// ===============================
+const panelBtn = document.getElementById("layer-control-btn");
+const panel = document.getElementById("layer-panel");
+
+panelBtn.onclick = () => {
+    panel.style.display = panel.style.display === "block" ? "none" : "block";
+};
+
+// ===============================
+// LAYER REGISTRY (CENTRAL CONTROL)
+// ===============================
+const layerRegistry = {
+    frontline: {
+        checkbox: "toggle-frontline",
+        layer: frontlineLayer
+    },
+
+    points: {
+        checkbox: "toggle-deepstate-points",
+        layer: deepstatePointsLayer
+    },
+
+    enemy: {
+        checkbox: "toggle-enemy",
+        layer: enemyLayer
+    },
+
+    belarus: {
+        checkbox: "toggle-illegal-belarus",
+        layer: illegalBelarusLayer
+    },
+
+    airports: {
+        checkbox: "toggle-airports",
+        layer: airportsLayer
+    },
+
+    arrows: {
+        checkbox: "toggle-arrows",
+        layer: arrowsLayer
+    }
+};
+
+// ===============================
+// GENERIC LAYER TOGGLE HANDLER
+// ===============================
+Object.values(layerRegistry).forEach(cfg => {
+
+    const el = document.getElementById(cfg.checkbox);
+    if (!el) return;
+
+    el.addEventListener("change", function () {
+
+        if (this.checked) {
+            map.addLayer(cfg.layer);
+        } else {
+            map.removeLayer(cfg.layer);
+        }
+    });
+});
+
+// ===============================
+// ROUTES TOGGLE (special case)
+// ===============================
+document.getElementById("toggle-routes").addEventListener("change", function () {
+
+    Object.values(activeRouteLines).forEach(layer => {
+
+        if (this.checked) {
+            map.addLayer(layer);
+        } else {
+            map.removeLayer(layer);
+        }
+    });
+});
+</script>
+<div class="modal fade" id="routeModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content bg-dark text-white">
+      <div class="modal-header"><h5 class="modal-title">Параметри маршруту</h5></div>
+      <div class="modal-body">
+        <input type="text" id="route-name" class="form-control mb-3" placeholder="Назва маршруту">
+        
+        <label class="mb-2">Колір маршруту:</label>
+        <div class="d-flex flex-wrap gap-2">
+            <style>
+                .color-radio { display: none; }
+                .color-label { 
+                    width: 35px; height: 35px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; 
+                }
+                .color-radio:checked + .color-label { border-color: white; transform: scale(1.1); }
+            </style>
+            
+            <input type="radio" name="route-color" value="#dc3545" id="c1" class="color-radio" checked>
+            <label for="c1" class="color-label" style="background:#dc3545;"></label>
+
+            <input type="radio" name="route-color" value="#0d6efd" id="c2" class="color-radio">
+            <label for="c2" class="color-label" style="background:#0d6efd;"></label>
+
+            <input type="radio" name="route-color" value="#198754" id="c3" class="color-radio">
+            <label for="c3" class="color-label" style="background:#198754;"></label>
+
+            <input type="radio" name="route-color" value="#ffc107" id="c4" class="color-radio">
+            <label for="c4" class="color-label" style="background:#ffc107;"></label>
+
+            <input type="radio" name="route-color" value="#6f42c1" id="c5" class="color-radio">
+            <label for="c5" class="color-label" style="background:#6f42c1;"></label>
+
+            <input type="radio" name="route-color" value="#fd7e14" id="c6" class="color-radio">
+            <label for="c6" class="color-label" style="background:#fd7e14;"></label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="resetRouteDrawing()">Скасувати</button>
+        <button type="button" class="btn btn-primary" onclick="confirmRouteSave()">Зберегти</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
