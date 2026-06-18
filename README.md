@@ -19,5 +19,3 @@
 * **Database:** SQLite3 (швидка локальна БД з підтримкою `Row` фабрики для оптимізації вибірок)
 * **Геодані:** Бібліотека `srtm` (локальний кеш матриці висот у `static/h`), Requests (інтеграція з зовнішніми API)
 * **Frontend:** HTML5, CSS3, JavaScript (Leaflet.js / OpenLayers — *впиши свій варіант фронту*)
-
-## 📦 Швидкий старт (Installation & Setup)
